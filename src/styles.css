@@ -124,6 +124,66 @@ button {
     0 5px 0 rgba(76, 41, 0, 0.24);
 }
 
+.bad-ball {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  width: var(--ingredient-size);
+  height: var(--ingredient-size);
+  place-items: center;
+  pointer-events: none;
+  font-size: calc(var(--ingredient-size) * 0.82);
+  line-height: 1;
+  filter: drop-shadow(0 0 9px rgba(255, 255, 255, 0.42))
+    drop-shadow(0 5px 0 rgba(15, 50, 40, 0.24));
+  will-change: transform, left, top;
+}
+
+.bad-ball-emoji {
+  display: block;
+  transition:
+    filter 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.bad-ball.is-punctured .bad-ball-emoji {
+  opacity: 0.82;
+  filter: grayscale(0.35) brightness(0.72);
+  transform: scaleX(1.12) scaleY(0.58) rotate(-8deg);
+}
+
+.bad-ball-hole {
+  position: absolute;
+  width: 34%;
+  height: 22%;
+  border-radius: 999px;
+  background: #101814;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.28);
+  transform: translate(18%, -8%) rotate(-24deg);
+}
+
+.bad-ball-hole::before,
+.bad-ball-hole::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.72rem;
+  height: 0.14rem;
+  border-radius: 999px;
+  background: #101814;
+  content: "";
+  transform-origin: left center;
+}
+
+.bad-ball-hole::before {
+  transform: rotate(38deg);
+}
+
+.bad-ball-hole::after {
+  transform: rotate(-42deg);
+}
+
 .ingredient.is-juggled span:first-child {
   animation: ingredient-boost-pulse 640ms ease-in-out infinite alternate;
 }
@@ -279,6 +339,42 @@ button {
   animation: final-red-card-reveal 1350ms cubic-bezier(0.18, 0.9, 0.28, 1) forwards;
 }
 
+.scroll-hint-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(0, 0, 0, 0.46);
+  pointer-events: none;
+}
+
+.scroll-hint-message {
+  display: grid;
+  gap: 0.35rem;
+  width: min(24rem, 100%);
+  border-radius: 8px;
+  padding: 1.05rem 1rem;
+  color: var(--text-light);
+  background: var(--panel-dark);
+  text-align: center;
+  box-shadow: 0 0.55rem 0 rgba(15, 50, 40, 0.32);
+  animation: scroll-hint-in 280ms ease-out;
+}
+
+.scroll-hint-message strong {
+  color: var(--text-warm);
+  font-size: 1.35rem;
+  line-height: 1.05;
+}
+
+.scroll-hint-message span {
+  color: var(--text-soft);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
 .start-menu {
   position: absolute;
   inset: 0;
@@ -293,7 +389,7 @@ button {
 .start-settings-button {
   position: absolute;
   top: max(1rem, env(safe-area-inset-top));
-  right: 1rem;
+  left: 1rem;
   display: inline-grid;
   width: 2.8rem;
   height: 2.8rem;
@@ -760,6 +856,100 @@ button {
   background: var(--panel-dark-alt);
 }
 
+.tutorial-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.tutorial-dialog {
+  display: grid;
+  gap: 1rem;
+  width: min(27rem, 100%);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  border-radius: 8px;
+  padding: 1rem;
+  color: var(--text-light);
+  background: var(--panel-dark);
+}
+
+.tutorial-header {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.tutorial-header span {
+  display: block;
+  color: var(--text-warm);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.tutorial-header h2 {
+  margin: 0.12rem 0 0;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.tutorial-steps {
+  display: grid;
+  gap: 0.62rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tutorial-steps li {
+  display: grid;
+  grid-template-columns: 2.35rem minmax(0, 1fr);
+  gap: 0.68rem;
+  align-items: center;
+  padding: 0.65rem;
+  border-radius: 8px;
+  background: var(--panel-dark-alt);
+}
+
+.tutorial-steps li > span {
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.13);
+  font-size: 1.35rem;
+}
+
+.tutorial-steps strong {
+  display: block;
+  line-height: 1.1;
+}
+
+.tutorial-steps p {
+  margin: 0.16rem 0 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  line-height: 1.24;
+}
+
+.tutorial-actions {
+  display: grid;
+}
+
+.tutorial-actions .confirm-button {
+  display: inline-flex;
+  min-height: 3.15rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
 .settings-backdrop {
   position: fixed;
   inset: 0;
@@ -793,6 +983,7 @@ button {
   font-size: 1.25rem;
 }
 
+.settings-help-button,
 .settings-reset-button {
   display: inline-flex;
   min-height: 3.2rem;
@@ -805,6 +996,16 @@ button {
   background: var(--gold);
   cursor: pointer;
   font-weight: 900;
+}
+
+.settings-help-button {
+  color: var(--text-light);
+  background: var(--panel-dark-alt);
+}
+
+.settings-reset-button {
+  color: var(--text-light);
+  background: var(--panel-dark-alt);
 }
 
 .reset-confirm-backdrop {
@@ -1192,8 +1393,7 @@ button {
 
 .panel-header h2,
 .panel-header p,
-.detail-header h2,
-.detail-header p {
+.detail-header h2 {
   margin: 0;
 }
 
@@ -1203,8 +1403,7 @@ button {
   line-height: 1.15;
 }
 
-.panel-header p,
-.detail-header p {
+.panel-header p {
   margin-top: 0.2rem;
   color: var(--text-soft);
   font-size: 0.9rem;
@@ -1402,6 +1601,33 @@ button {
   font-size: 2.5rem;
 }
 
+.recipe-detail-image {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  overflow: hidden;
+  background: var(--panel-dark-alt);
+}
+
+.recipe-detail-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.recipe-detail-image.is-empty {
+  background:
+    linear-gradient(135deg, rgba(255, 200, 0, 0.2), transparent 44%),
+    var(--panel-dark-alt);
+}
+
+.recipe-detail-image.is-empty span {
+  font-size: clamp(4rem, 18vw, 7rem);
+  filter: drop-shadow(0 0.35rem 0 rgba(15, 50, 40, 0.28));
+}
+
 .detail-section {
   padding: 1rem;
 }
@@ -1594,6 +1820,18 @@ button {
 
   36%,
   100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes scroll-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem) scale(0.96);
+  }
+
+  to {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
