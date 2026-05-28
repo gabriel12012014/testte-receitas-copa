@@ -1,45 +1,45 @@
 import {
   BookOpen,
-  ChefHat,
   Copy,
-  Download,
   Home,
   Lock,
   MessageCircle,
-  Pause,
   Play,
   RotateCcw,
-  Settings,
-  Share2,
-  Trophy,
   Unlock,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import recipesCsv from './data/recipes.csv?raw';
-import receitasLogoUrl from '../assets/logo_receitas_horizontal.svg';
+import recipesCsv from '../assets/receitas-copa-do-mundo-jogo.csv?raw';
+import receitasIconLogoUrl from '../assets/logo-receitas-icone.png';
+import receitasHorizontalLogoUrl from '../assets/logo_receitas_horizontal.svg';
+import recipeLockedIconUrl from '../assets/icone-bloqueado.png';
+import recipeUnlockedIconUrl from '../assets/icone-desbloqueado.png';
+import recipeHeaderIconUrl from '../assets/icone-receitas.png';
+import opcoesButtonUrl from '../assets/btn-opcoes.png';
+import playButtonUrl from '../assets/btn-play.png';
+import receitasButtonUrl from '../assets/btn-receitas.png';
+import recipeBackButtonUrl from '../assets/btn-voltar.png';
+import gameLogoUrl from '../assets/logo-copa.png';
+import pausaButtonUrl from '../assets/btn-pausa.png';
+import yellowCardUrl from '../assets/cartao-amarelo.png';
+import emptyCardUrl from '../assets/cartao-nulo.png';
+import redCardUrl from '../assets/cartao-vermelho.png';
+import gameOverDownloadButtonUrl from '../assets/fim_de_jogo/btn_baixar.png';
+import gameOverRestartButtonUrl from '../assets/fim_de_jogo/btn_jogar_pontos.png';
+import gameOverRecipesButtonUrl from '../assets/fim_de_jogo/btn_receitas.png';
+import gameOverShareButtonUrl from '../assets/fim_de_jogo/btn_share.png';
 
 const STORAGE_KEY = 'copa-dos-sabores-progress-v1';
 const TUTORIAL_STORAGE_KEY = 'copa-dos-sabores-tutorial-v1';
 
-const ingredientCatalog = [
-  { key: 'egg', label: 'Ovo', emoji: '🥚', score: 10 },
-  { key: 'chicken', label: 'Filé de frango', emoji: '🍗', score: 12 },
-  { key: 'beef', label: 'Carne', emoji: '🥩', score: 12 },
-  { key: 'beans', label: 'Feijão', emoji: '🫘', score: 10 },
-  { key: 'rice', label: 'Arroz', emoji: '🍚', score: 10 },
-  { key: 'tomato', label: 'Tomate', emoji: '🍅', score: 10 },
-  { key: 'onion', label: 'Cebola', emoji: '🧅', score: 10 },
-  { key: 'cheese', label: 'Queijo', emoji: '🧀', score: 11 },
-  { key: 'corn', label: 'Milho', emoji: '🌽', score: 10 },
-  { key: 'pepper', label: 'Pimentão', emoji: '🫑', score: 11 },
-  { key: 'potato', label: 'Batata', emoji: '🥔', score: 10 },
-  { key: 'pasta', label: 'Massa', emoji: '🍝', score: 12 },
-  { key: 'carrot', label: 'Cenoura', emoji: '🥕', score: 10 },
-] as const;
-
-type IngredientKey = (typeof ingredientCatalog)[number]['key'];
-type Ingredient = (typeof ingredientCatalog)[number];
+type IngredientKey = string;
+type Ingredient = {
+  key: IngredientKey;
+  label: string;
+  emoji: string;
+  score: number;
+};
 type Inventory = Record<IngredientKey, number>;
 
 type Recipe = {
@@ -49,7 +49,7 @@ type Recipe = {
   name: string;
   imageUrl: string;
   ingredients: Partial<Record<IngredientKey, number>>;
-  steps: string[];
+  description: string;
 };
 
 type FallingIngredient = {
@@ -89,6 +89,8 @@ type FallingBadBall = {
   rotation: number;
   vr: number;
   size: number;
+  juggleCount: number;
+  lastJuggledAt: number;
   puncturedAt: number | null;
 };
 
@@ -164,6 +166,19 @@ type ComboBanner = {
   multiplier: number;
 };
 
+type BallJuggleCallout =
+  | {
+      id: string;
+      kind: 'count';
+      count: number;
+    }
+  | {
+      id: string;
+      kind: 'payout';
+      count: number;
+      points: number;
+    };
+
 type PuncturedBall = {
   id: string;
   x: number;
@@ -184,6 +199,7 @@ type Progress = {
   score: number;
   cuts: number;
   inventory: Inventory;
+  newRecipeIds: string[];
 };
 
 type EmbeddedScreen = 'playing' | 'pause' | 'menu' | 'receitas';
@@ -195,13 +211,14 @@ type ShareCardOptions = {
   shareUrl: string;
 };
 
-const INGREDIENTS: readonly Ingredient[] = ingredientCatalog;
 const MIN_SLICE_MOVEMENT = 3;
 const SLICE_REARM_DISTANCE = 20;
 const INITIAL_LIVES = 3;
 const TRAIL_LIFETIME_MS = 170;
 const SCORE_POPUP_LIFETIME_MS = 520;
 const COMBO_BANNER_LIFETIME_MS = 820;
+const BALL_JUGGLE_COUNT_CALLOUT_LIFETIME_MS = 820;
+const BALL_JUGGLE_PAYOUT_CALLOUT_LIFETIME_MS = 1600;
 const MOVEMENT_COMBO_RESET_MS = 260;
 const POINTS_PER_SLICE_TARGET = 5;
 const DIFFICULTY_RAMP_MS = 90000;
@@ -209,16 +226,89 @@ const JUGGLE_ZONE_HEIGHT_RATIO = 0.2;
 const JUGGLE_REHIT_COOLDOWN_MS = 420;
 const JUGGLE_GLOW_MAX_LEVEL = 3;
 const SPIN_GESTURE_THRESHOLD_RADIANS = Math.PI * 1.5;
-const LIFE_CARD_SPAWN_CHANCE = 0.1;
+const MAX_FRAGMENT_RECUTS = 2;
+const MOBILE_ARENA_WIDTH = 620;
+const MOBILE_INGREDIENT_GRAVITY = 620;
+const MOBILE_SPECIAL_ITEM_GRAVITY = 720;
+const DESKTOP_ITEM_GRAVITY = 580;
+const LIFE_CARD_SPAWN_CHANCE = 0.02;
 const BAD_BALL_SPAWN_CHANCE = 0.2;
 const SPECIAL_ONLY_LAUNCH_CHANCE = 0.3;
 const PUNCTURED_BALL_LIFETIME_MS = 900;
 const COUNTDOWN_STEP_MS = 520;
 const FINAL_RED_CARD_DELAY_MS = 1350;
-const SCROLL_HINT_IDLE_MS = 10000;
+const SCROLL_HINT_IDLE_MS = 15000;
 const EMBED_PARENT_ORIGIN = import.meta.env.VITE_COPA_PARENT_ORIGIN || '*';
-const GAME_TITLE = 'Copa dos Sabores';
-const SHARE_IMAGE_FILENAME = 'copa-dos-sabores-resultado.png';
+const GAME_TITLE = 'Sabores na Copa';
+const SHARE_IMAGE_FILENAME = 'sabores-na-copa-resultado.png';
+
+const INGREDIENT_EMOJIS_BY_NORMALIZED_LABEL: Record<string, string> = {
+  acucar: '🍬',
+  'acucar-mascavo': '🍬',
+  agua: '💧',
+  aipim: '🍠',
+  alecrim: '🌿',
+  alface: '🥬',
+  alho: '🧄',
+  amendoa: '🌰',
+  'amido-de-batata': '🥔',
+  arroz: '🍚',
+  aveia: '🌾',
+  avela: '🌰',
+  azeite: '🫒',
+  bacon: '🥓',
+  'banana-da-terra': '🍌',
+  batata: '🥔',
+  caramelo: '🍮',
+  carne: '🥩',
+  cebola: '🧅',
+  'cebola-roxa': '🧅',
+  cenoura: '🥕',
+  cerveja: '🍺',
+  chimichurri: '🌿',
+  chocolate: '🍫',
+  chufas: '🫘',
+  'coco-ralado': '🥥',
+  'creme-de-leite': '🥛',
+  'cuscuz-marroquino': '🌾',
+  damasco: '🍑',
+  farinha: '🌾',
+  'farinha-de-milho': '🌽',
+  'farinha-de-trigo': '🌾',
+  feijao: '🫘',
+  frango: '🍗',
+  'gema-de-ovo': '🥚',
+  gengibre: '🫚',
+  'grao-de-bico': '🫘',
+  leite: '🥛',
+  limao: '🍋',
+  linguica: '🌭',
+  maca: '🍎',
+  manteiga: '🧈',
+  mel: '🍯',
+  milho: '🌽',
+  nozes: '🌰',
+  ovo: '🥚',
+  pao: '🍞',
+  peixe: '🐟',
+  pimenta: '🌶️',
+  'pimenta-do-reino': '🌶️',
+  pimentao: '🫑',
+  presunto: '🥓',
+  queijo: '🧀',
+  'repolho-branco': '🥬',
+  requeijao: '🧀',
+  sal: '🧂',
+  shoyu: '🥢',
+  'suco-de-limao': '🍋',
+  tamaras: '🌴',
+  tomate: '🍅',
+  trigo: '🌾',
+  vinagre: '🍶',
+  zimbros: '🫐',
+};
+
+const INGREDIENTS: readonly Ingredient[] = parseIngredientCatalog(recipesCsv);
 
 const INGREDIENT_BY_KEY = Object.fromEntries(
   INGREDIENTS.map((ingredient) => [ingredient.key, ingredient]),
@@ -226,6 +316,21 @@ const INGREDIENT_BY_KEY = Object.fromEntries(
 
 function getJuggleMultiplier(juggleCount: number) {
   return 2 ** juggleCount;
+}
+
+function getBallJugglePoints(juggleCount: number) {
+  return juggleCount <= 0 ? 0 : 2 ** (juggleCount - 1);
+}
+
+function getBallJuggleLabel(juggleCount: number) {
+  return juggleCount === 1 ? 'Embaixadinha' : 'Embaixadinhas';
+}
+
+function formatGameClock(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 function getComboPointsFromMultipliers(multipliers: Iterable<number>) {
@@ -245,14 +350,14 @@ function getComboPointsFromMultipliers(multipliers: Iterable<number>) {
   );
 }
 
-function getPenaltyCardStateClass(index: number, lives: number) {
+function getPenaltyCardImageUrl(index: number, lives: number) {
   const receivedCards = INITIAL_LIVES - lives;
 
   if (lives <= 0 && index === INITIAL_LIVES - 1) {
-    return 'is-red';
+    return redCardUrl;
   }
 
-  return index < receivedCards ? 'is-yellow' : 'is-empty';
+  return index < receivedCards ? yellowCardUrl : emptyCardUrl;
 }
 
 type CsvRecord = Record<string, string>;
@@ -274,14 +379,41 @@ function slugifyCsvValue(value: string) {
 }
 
 const COUNTRY_FLAGS_BY_NAME: Record<string, string> = {
+  [normalizeCsvValue('Alemanha')]: '🇩🇪',
+  [normalizeCsvValue('Arábia Saudita')]: '🇸🇦',
   [normalizeCsvValue('Brasil')]: '🇧🇷',
   [normalizeCsvValue('Argentina')]: '🇦🇷',
-  [normalizeCsvValue('México')]: '🇲🇽',
-  [normalizeCsvValue('Japão')]: '🇯🇵',
+  [normalizeCsvValue('Austrália')]: '🇦🇺',
+  [normalizeCsvValue('Áustria')]: '🇦🇹',
+  [normalizeCsvValue('Bélgica')]: '🇧🇪',
+  [normalizeCsvValue('Cabo Verde')]: '🇨🇻',
+  [normalizeCsvValue('Catar')]: '🇶🇦',
+  [normalizeCsvValue('Colômbia')]: '🇨🇴',
+  [normalizeCsvValue('Egito')]: '🇪🇬',
+  [normalizeCsvValue('Equador')]: '🇪🇨',
+  [normalizeCsvValue('Escócia')]: '🏴',
+  [normalizeCsvValue('Espanha')]: '🇪🇸',
+  [normalizeCsvValue('Fraça')]: '🇫🇷',
   [normalizeCsvValue('França')]: '🇫🇷',
-  [normalizeCsvValue('Itália')]: '🇮🇹',
-  [normalizeCsvValue('Alemanha')]: '🇩🇪',
+  [normalizeCsvValue('Holanda')]: '🇳🇱',
+  [normalizeCsvValue('Inglaterra')]: '🏴',
+  [normalizeCsvValue('Iraque')]: '🇮🇶',
+  [normalizeCsvValue('Japão')]: '🇯🇵',
+  [normalizeCsvValue('Jordânia')]: '🇯🇴',
   [normalizeCsvValue('Marrocos')]: '🇲🇦',
+  [normalizeCsvValue('México')]: '🇲🇽',
+  [normalizeCsvValue('Noruega')]: '🇳🇴',
+  [normalizeCsvValue('Nova Zelândia')]: '🇳🇿',
+  [normalizeCsvValue('Panamá')]: '🇵🇦',
+  [normalizeCsvValue('Paraguai')]: '🇵🇾',
+  [normalizeCsvValue('Portugal')]: '🇵🇹',
+  [normalizeCsvValue('República da Coreia')]: '🇰🇷',
+  [normalizeCsvValue('Senegal')]: '🇸🇳',
+  [normalizeCsvValue('Suécia')]: '🇸🇪',
+  [normalizeCsvValue('Suíça')]: '🇨🇭',
+  [normalizeCsvValue('Tunísia')]: '🇹🇳',
+  [normalizeCsvValue('Turquia')]: '🇹🇷',
+  [normalizeCsvValue('Uruguai')]: '🇺🇾',
 };
 
 const INGREDIENT_KEY_BY_CSV_VALUE = Object.fromEntries(
@@ -370,6 +502,52 @@ function getCsvCell(row: CsvRecord, ...names: string[]) {
   return '';
 }
 
+function getIngredientEmoji(label: string) {
+  return INGREDIENT_EMOJIS_BY_NORMALIZED_LABEL[slugifyCsvValue(label)] ?? '🍽️';
+}
+
+function parseIngredientCatalog(csv: string): Ingredient[] {
+  const ingredientNames = new Map<string, string>();
+
+  for (const row of parseCsvRecords(csv)) {
+    const recipeName = getCsvCell(row, 'Nome da receita', 'Nome');
+    const country = getCsvCell(row, 'Pais', 'País');
+
+    if (!recipeName || !country) {
+      continue;
+    }
+
+    for (let index = 1; index <= 5; index += 1) {
+      const suffix = String(index).padStart(2, '0');
+      const ingredientName = getCsvCell(row, `Ingrediente${suffix}`);
+      const amountText = getCsvCell(
+        row,
+        `quantidadeIngrediente${suffix}`,
+        `QuantidadeIngrediente${suffix}`,
+      );
+      const amount = Number(amountText.replace(',', '.'));
+
+      if (!ingredientName || !Number.isFinite(amount) || amount <= 0) {
+        continue;
+      }
+
+      const normalizedName = normalizeCsvValue(ingredientName);
+      if (!ingredientNames.has(normalizedName)) {
+        ingredientNames.set(normalizedName, ingredientName.trim());
+      }
+    }
+  }
+
+  return [...ingredientNames.values()]
+    .sort((first, second) => first.localeCompare(second, 'pt-BR'))
+    .map((label) => ({
+      key: slugifyCsvValue(label),
+      label,
+      emoji: getIngredientEmoji(label),
+      score: 10,
+    }));
+}
+
 function normalizeRecipeImageUrl(value: string) {
   const imageUrl = value.trim();
 
@@ -410,19 +588,8 @@ function parseRecipeIngredients(row: CsvRecord, recipeName: string) {
   return ingredients;
 }
 
-function parseRecipeSteps(row: CsvRecord) {
-  const singleColumnSteps = getCsvCell(row, 'Modo de preparo', 'ModoPreparo', 'Preparo');
-
-  if (singleColumnSteps) {
-    return singleColumnSteps
-      .split('|')
-      .map((step) => step.trim())
-      .filter(Boolean);
-  }
-
-  return [1, 2, 3]
-    .map((stepIndex) => getCsvCell(row, `ModoPreparo${String(stepIndex).padStart(2, '0')}`))
-    .filter(Boolean);
+function parseRecipeDescription(row: CsvRecord) {
+  return getCsvCell(row, 'Descrição', 'Descricao', 'Description');
 }
 
 function parseRecipesCsv(csv: string): Recipe[] {
@@ -450,7 +617,7 @@ function parseRecipesCsv(csv: string): Recipe[] {
         name,
         imageUrl: normalizeRecipeImageUrl(getCsvCell(row, 'Imagem', 'Image')),
         ingredients,
-        steps: parseRecipeSteps(row),
+        description: parseRecipeDescription(row),
       };
     })
     .filter((recipe): recipe is Recipe => recipe !== null);
@@ -470,6 +637,7 @@ function createEmptyProgress(): Progress {
     score: 0,
     cuts: 0,
     inventory: createEmptyInventory(),
+    newRecipeIds: [],
   };
 }
 
@@ -494,6 +662,12 @@ function loadProgress(): Progress {
       score: typeof parsed.score === 'number' && parsed.score > 0 ? parsed.score : 0,
       cuts: typeof parsed.cuts === 'number' && parsed.cuts > 0 ? parsed.cuts : 0,
       inventory,
+      newRecipeIds: Array.isArray(parsed.newRecipeIds)
+        ? parsed.newRecipeIds.filter(
+            (id): id is string =>
+              typeof id === 'string' && RECIPES.some((recipe) => recipe.id === id),
+          )
+        : [],
     };
   } catch {
     return fallback;
@@ -567,7 +741,7 @@ function isAllowedParentOrigin(origin: string) {
 }
 
 function getRecentShareRecipes(recipes: Recipe[]) {
-  return recipes.slice(-3).reverse();
+  return recipes.slice(0, 3);
 }
 
 function getShareText(score: number, recipes: Recipe[]) {
@@ -611,50 +785,12 @@ function fillRoundedRect(
   context.fill();
 }
 
-function drawWrappedText(
-  context: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight: number,
-  maxLines = 3,
-) {
-  const words = text.split(' ');
-  const lines: string[] = [];
-  let currentLine = '';
-
-  for (const word of words) {
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
-
-    if (context.measureText(testLine).width <= maxWidth || !currentLine) {
-      currentLine = testLine;
-      continue;
-    }
-
-    lines.push(currentLine);
-    currentLine = word;
-
-    if (lines.length === maxLines) {
-      break;
-    }
-  }
-
-  if (currentLine && lines.length < maxLines) {
-    lines.push(currentLine);
-  }
-
-  lines.forEach((line, index) => {
-    context.fillText(line, x, y + index * lineHeight);
-  });
-
-  return y + lines.length * lineHeight;
-}
-
 async function createScoreShareImage({ score, recipes, shareUrl }: ShareCardOptions) {
   const canvas = document.createElement('canvas');
   const width = 1080;
   const height = 1350;
+  const contentX = 96;
+  const contentWidth = width - contentX * 2;
   canvas.width = width;
   canvas.height = height;
 
@@ -666,63 +802,61 @@ async function createScoreShareImage({ score, recipes, shareUrl }: ShareCardOpti
   context.fillStyle = '#0f3228';
   context.fillRect(0, 0, width, height);
 
-  context.fillStyle = '#ffc800';
-  context.font = '900 44px Inter, Arial, sans-serif';
   context.textBaseline = 'top';
 
   try {
-    const logo = await loadCanvasImage(receitasLogoUrl);
-    const logoWidth = 275;
-    const logoHeight = logoWidth * (logo.naturalHeight / logo.naturalWidth);
-    context.drawImage(logo, 72, 74, logoWidth, logoHeight);
-    context.fillText('+ Copa do Mundo', 370, 86);
+    const logo = await loadCanvasImage(gameLogoUrl);
+    const logoHeight = 330;
+    const logoWidth = logoHeight * (logo.naturalWidth / logo.naturalHeight);
+    context.drawImage(logo, (width - logoWidth) / 2, 24, logoWidth, logoHeight);
   } catch {
-    context.fillText('receitas + Copa do Mundo', 72, 86);
+    context.fillStyle = '#ffc800';
+    context.font = '900 62px gopher, Arial, sans-serif';
+    context.textAlign = 'center';
+    context.fillText(GAME_TITLE, width / 2, 108);
   }
 
   context.fillStyle = '#ffffff';
-  context.font = '800 42px Inter, Arial, sans-serif';
-  drawWrappedText(context, getShareText(score, recipes), 72, 190, width - 144, 56, 3);
+  context.font = '900 58px gopher, Arial, sans-serif';
+  context.textAlign = 'center';
+  context.fillText('Fiz', width / 2, 390);
 
   context.fillStyle = '#ffc800';
-  fillRoundedRect(context, 132, 390, width - 264, 315, 26);
+  fillRoundedRect(context, contentX, 468, contentWidth, 285, 26);
   context.fillStyle = '#a5147d';
-  context.font = '900 150px Inter, Arial, sans-serif';
-  context.textAlign = 'center';
-  context.fillText(String(score), width / 2, 448);
-  context.font = '900 44px Inter, Arial, sans-serif';
-  context.fillText('PONTOS', width / 2, 610);
+  context.font = '900 136px gopher, Arial, sans-serif';
+  context.fillText(String(score), width / 2, 513);
+  context.font = '900 42px gopher, Arial, sans-serif';
+  context.fillText('PONTOS', width / 2, 660);
+
+  context.fillStyle = '#ffffff';
+  context.font = '900 48px gopher, Arial, sans-serif';
+  context.fillText('no jogo Sabores na Copa', width / 2, 800);
 
   context.textAlign = 'left';
   context.fillStyle = '#a5147d';
-  fillRoundedRect(context, 72, 795, width - 144, 330, 24);
+  fillRoundedRect(context, contentX, 868, contentWidth, 390, 24);
   context.fillStyle = '#ffffff';
-  context.font = '900 40px Inter, Arial, sans-serif';
-  context.fillText('Receitas descobertas', 112, 835);
+  context.font = '900 40px gopher, Arial, sans-serif';
+  context.fillText('Receitas descobertas', contentX + 40, 910);
 
-  const recipeList = recipes.length > 0 ? recipes : [];
+  const recipeList = recipes.slice(0, 3);
   if (recipeList.length === 0) {
     context.fillStyle = '#5a2864';
-    fillRoundedRect(context, 112, 910, width - 224, 80, 18);
+    fillRoundedRect(context, contentX + 40, 988, contentWidth - 80, 80, 18);
     context.fillStyle = '#ffffff';
-    context.font = '800 34px Inter, Arial, sans-serif';
-    context.fillText('Nenhuma receita nova nesta rodada', 146, 930);
+    context.font = '800 34px gopher, Arial, sans-serif';
+    context.fillText('Nenhuma receita nova nesta rodada', contentX + 74, 1008);
   } else {
     recipeList.forEach((recipe, index) => {
-      const itemY = 905 + index * 82;
+      const itemY = 983 + index * 84;
       context.fillStyle = '#5a2864';
-      fillRoundedRect(context, 112, itemY, width - 224, 64, 16);
+      fillRoundedRect(context, contentX + 40, itemY, contentWidth - 80, 64, 16);
       context.fillStyle = '#ffffff';
-      context.font = '800 34px Inter, Arial, sans-serif';
-      context.fillText(`${recipe.flag}  ${recipe.name}`, 142, itemY + 15);
+      context.font = '800 34px gopher, Arial, sans-serif';
+      context.fillText(`${recipe.flag}  ${recipe.name}`, contentX + 70, itemY + 15);
     });
   }
-
-  context.fillStyle = '#ffffff';
-  context.font = '900 42px Inter, Arial, sans-serif';
-  context.textAlign = 'center';
-  context.fillText('Jogue também', width / 2, 1224);
-  context.textAlign = 'left';
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -802,16 +936,47 @@ function pickLaunchAmount(difficulty: number) {
   return 4;
 }
 
+function getFallingItemGravity(arenaWidth: number, kind: FallingItem['kind']) {
+  if (arenaWidth >= MOBILE_ARENA_WIDTH) {
+    return DESKTOP_ITEM_GRAVITY;
+  }
+
+  return kind === 'ingredient' ? MOBILE_INGREDIENT_GRAVITY : MOBILE_SPECIAL_ITEM_GRAVITY;
+}
+
+function keepLaunchVelocityBelowTop(
+  desiredVelocity: number,
+  arenaHeight: number,
+  itemSize: number,
+  gravity: number,
+) {
+  if (desiredVelocity >= 0) {
+    return desiredVelocity;
+  }
+
+  const launchY = arenaHeight + 80;
+  const minCenterY = itemSize * 0.64;
+  const safeTravelDistance = Math.max(0, launchY - minCenterY);
+  const maxSafeSpeed = Math.sqrt(2 * gravity * safeTravelDistance);
+
+  return -Math.min(Math.abs(desiredVelocity), maxSafeSpeed);
+}
+
 function createFallingIngredient(
   arenaWidth: number,
   arenaHeight: number,
   preferredX?: number,
 ): FallingIngredient {
   const ingredient = pickIngredient();
-  const isMobileArena = arenaWidth < 620;
+  const isMobileArena = arenaWidth < MOBILE_ARENA_WIDTH;
   const margin = Math.min(96, Math.max(46, arenaWidth * 0.12));
   const baseSize = arenaWidth < 560 ? 58 : 72;
-  const upwardVelocity = isMobileArena ? -860 - Math.random() * 220 : -760 - Math.random() * 180;
+  const size = baseSize + Math.random() * 18;
+  const gravity = getFallingItemGravity(arenaWidth, 'ingredient');
+  const desiredUpwardVelocity = isMobileArena ? -800 - Math.random() * 120 : -760 - Math.random() * 180;
+  const upwardVelocity = isMobileArena
+    ? keepLaunchVelocityBelowTop(desiredUpwardVelocity, arenaHeight, size, gravity)
+    : desiredUpwardVelocity;
   const randomX = margin + Math.random() * Math.max(1, arenaWidth - margin * 2);
   const x = Math.max(margin, Math.min(arenaWidth - margin, preferredX ?? randomX));
 
@@ -825,7 +990,7 @@ function createFallingIngredient(
     vy: upwardVelocity,
     rotation: Math.random() * 90 - 45,
     vr: (Math.random() - 0.5) * 300,
-    size: baseSize + Math.random() * 18,
+    size,
     juggleCount: 0,
     lastJuggledAt: 0,
   };
@@ -839,7 +1004,7 @@ function createFallingPenaltyCard(
   const isMobileArena = arenaWidth < 620;
   const margin = Math.min(96, Math.max(46, arenaWidth * 0.12));
   const baseSize = arenaWidth < 560 ? 58 : 72;
-  const upwardVelocity = isMobileArena ? -850 - Math.random() * 190 : -740 - Math.random() * 170;
+  const upwardVelocity = isMobileArena ? -710 - Math.random() * 120 : -740 - Math.random() * 170;
   const randomX = margin + Math.random() * Math.max(1, arenaWidth - margin * 2);
   const x = Math.max(margin, Math.min(arenaWidth - margin, preferredX ?? randomX));
 
@@ -864,7 +1029,7 @@ function createFallingBadBall(
   const isMobileArena = arenaWidth < 620;
   const margin = Math.min(96, Math.max(46, arenaWidth * 0.12));
   const baseSize = arenaWidth < 560 ? 56 : 70;
-  const upwardVelocity = isMobileArena ? -830 - Math.random() * 210 : -730 - Math.random() * 175;
+  const upwardVelocity = isMobileArena ? -700 - Math.random() * 125 : -730 - Math.random() * 175;
   const randomX = margin + Math.random() * Math.max(1, arenaWidth - margin * 2);
   const x = Math.max(margin, Math.min(arenaWidth - margin, preferredX ?? randomX));
 
@@ -878,6 +1043,8 @@ function createFallingBadBall(
     rotation: Math.random() * 80 - 40,
     vr: (Math.random() - 0.5) * 280,
     size: baseSize + Math.random() * 14,
+    juggleCount: 0,
+    lastJuggledAt: 0,
     puncturedAt: null,
   };
 }
@@ -938,19 +1105,22 @@ function getJuggleGlowClass(juggleCount: number) {
   return `is-juggled juggle-level-${Math.min(JUGGLE_GLOW_MAX_LEVEL, juggleCount)}`;
 }
 
-function applyJuggleToItems(
+function applyJuggleToBall(
   items: FallingItem[],
   point: TrailPoint,
   arenaWidth: number,
   arenaHeight: number,
-) {
+): {
+  items: FallingItem[];
+  bouncedBall: FallingBadBall | null;
+} {
   let closestIndex = -1;
   let closestDistance = Number.POSITIVE_INFINITY;
 
-	  items.forEach((item, index) => {
-	    if (item.kind !== 'ingredient') {
-	      return;
-	    }
+		  items.forEach((item, index) => {
+		    if (item.kind !== 'bad-ball' || item.puncturedAt !== null) {
+		      return;
+		    }
 
     if (item.vy <= 0) {
       return;
@@ -966,24 +1136,25 @@ function applyJuggleToItems(
   });
 
   if (closestIndex === -1) {
-    return items;
+    return { items, bouncedBall: null };
   }
 
   const isMobileArena = arenaWidth < 620;
-  const bounceVelocity = isMobileArena ? -920 - Math.random() * 130 : -820 - Math.random() * 110;
+  const bounceVelocity = isMobileArena ? -700 - Math.random() * 90 : -820 - Math.random() * 110;
   const bouncedItem = items[closestIndex];
-  if (bouncedItem.kind !== 'ingredient') {
-    return items;
+  if (bouncedItem.kind !== 'bad-ball') {
+    return { items, bouncedBall: null };
   }
 
   const nextJuggleCount = bouncedItem.juggleCount + 1;
+  let bouncedBall: FallingBadBall | null = null;
 
-  return items.map((item, index) => {
-    if (index !== closestIndex || item.kind !== 'ingredient') {
+  const nextItems = items.map((item, index) => {
+    if (index !== closestIndex || item.kind !== 'bad-ball') {
       return item;
     }
 
-    return {
+    bouncedBall = {
       ...item,
       y: Math.min(item.y, point.y - item.size * 0.32, arenaHeight - item.size * 0.45),
       vx: item.vx * 0.42 + Math.max(-170, Math.min(170, (item.x - point.x) * 3.2)),
@@ -992,7 +1163,11 @@ function applyJuggleToItems(
       juggleCount: nextJuggleCount,
       lastJuggledAt: point.t,
     };
+
+    return bouncedBall;
   });
+
+  return { items: nextItems, bouncedBall };
 }
 
 function getSignedAngleDelta(previousAngle: number, currentAngle: number) {
@@ -1024,6 +1199,10 @@ type SliceSource = {
 };
 
 function splitSliceSource(source: SliceSource): SliceEffect[] {
+  if (source.depth > MAX_FRAGMENT_RECUTS) {
+    return [];
+  }
+
   const midpoint = (source.clipStart + source.clipEnd) / 2;
   const parentCenter = (source.clipStart + source.clipEnd) / 2;
   const angle = (source.rotation * Math.PI) / 180;
@@ -1054,6 +1233,10 @@ function splitSliceSource(source: SliceSource): SliceEffect[] {
       vr: source.vr * 0.32 + direction * (360 + Math.random() * 260),
     };
   });
+}
+
+function canSliceFragment(effect: SliceEffect) {
+  return effect.depth <= MAX_FRAGMENT_RECUTS;
 }
 
 function getFragmentBoxPosition(effect: SliceEffect) {
@@ -1134,11 +1317,14 @@ export default function App() {
   const [items, setItems] = useState<FallingItem[]>([]);
   const [sliceEffects, setSliceEffects] = useState<SliceEffect[]>([]);
   const [trail, setTrail] = useState<TrailPoint[]>([]);
+  const [juggleShoePoint, setJuggleShoePoint] = useState<TrailPoint | null>(null);
   const [scorePopups, setScorePopups] = useState<ScorePopup[]>([]);
   const [puncturedBalls, setPuncturedBalls] = useState<PuncturedBall[]>([]);
   const [comboBanner, setComboBanner] = useState<ComboBanner | null>(null);
+  const [ballJuggleCallout, setBallJuggleCallout] = useState<BallJuggleCallout | null>(null);
   const [arenaSize, setArenaSize] = useState({ width: 1, height: 1 });
   const [gameStarted, setGameStarted] = useState(false);
+  const [elapsedGameSeconds, setElapsedGameSeconds] = useState(0);
   const [tutorialSeen, setTutorialSeen] = useState(() => loadTutorialSeen());
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [countdownValue, setCountdownValue] = useState<CountdownValue | null>(null);
@@ -1168,6 +1354,7 @@ export default function App() {
   const activeComboRef = useRef<ActiveSliceCombo | null>(null);
   const knownUnlockedRef = useRef<Set<string> | null>(null);
   const roundStartedAtRef = useRef(0);
+  const elapsedGameMsRef = useRef(0);
   const badBallNeedsFoodGapRef = useRef(false);
   const livesRef = useRef(INITIAL_LIVES);
 
@@ -1183,6 +1370,7 @@ export default function App() {
     () => RECIPES.filter((recipe) => isRecipeUnlocked(recipe, progress.inventory)),
     [progress.inventory],
   );
+  const gameClock = formatGameClock(elapsedGameSeconds);
 
   const gamePaused =
     !gameStarted ||
@@ -1235,6 +1423,45 @@ export default function App() {
 
   const registerMissedIngredients = useCallback((amount: number) => {
     setLives((currentLives) => Math.max(0, currentLives - amount));
+  }, []);
+
+  const awardBallJugglePayouts = useCallback((balls: FallingBadBall[], now: number) => {
+    const payouts = balls
+      .filter((ball) => ball.juggleCount > 0)
+      .map((ball) => ({
+        ball,
+        points: getBallJugglePoints(ball.juggleCount),
+      }))
+      .filter((payout) => payout.points > 0);
+
+    if (payouts.length === 0) {
+      return;
+    }
+
+    const totalPoints = payouts.reduce((sum, payout) => sum + payout.points, 0);
+    const featuredPayout = payouts[payouts.length - 1];
+
+    setProgress((currentProgress) => ({
+      ...currentProgress,
+      score: currentProgress.score + totalPoints,
+    }));
+    setScorePopups((currentPopups) => [
+      ...currentPopups,
+      ...payouts.map(({ ball, points }) => ({
+        id: makeId('score-popup'),
+        amount: points,
+        isCombo: points > POINTS_PER_SLICE_TARGET,
+        x: ball.x,
+        y: ball.y,
+        t: now,
+      })),
+    ].slice(-18));
+    setBallJuggleCallout({
+      id: makeId('ball-juggle-payout'),
+      kind: 'payout',
+      count: featuredPayout.ball.juggleCount,
+      points: featuredPayout.points,
+    });
   }, []);
 
   useEffect(() => {
@@ -1309,6 +1536,32 @@ export default function App() {
   }, [countdownValue]);
 
   useEffect(() => {
+    if (gamePaused) {
+      return;
+    }
+
+    let lastTime = performance.now();
+
+    const syncClock = () => {
+      const now = performance.now();
+      elapsedGameMsRef.current += Math.max(0, now - lastTime);
+      lastTime = now;
+
+      const nextSeconds = Math.floor(elapsedGameMsRef.current / 1000);
+      setElapsedGameSeconds((currentSeconds) =>
+        currentSeconds === nextSeconds ? currentSeconds : nextSeconds,
+      );
+    };
+
+    const interval = window.setInterval(syncClock, 250);
+
+    return () => {
+      syncClock();
+      window.clearInterval(interval);
+    };
+  }, [gamePaused]);
+
+  useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (!isAllowedParentOrigin(event.origin)) {
         return;
@@ -1342,7 +1595,29 @@ export default function App() {
     const freshUnlocks = currentUnlocked.filter((recipe) => !knownUnlocked.has(recipe.id));
 
     if (freshUnlocks.length > 0) {
+      const freshUnlockIds = freshUnlocks.map((recipe) => recipe.id);
+
       setUnlockToast(freshUnlocks[0]);
+      setProgress((currentProgress) => {
+        const currentNewRecipeIds = new Set(currentProgress.newRecipeIds);
+        let changed = false;
+
+        for (const recipeId of freshUnlockIds) {
+          if (!currentNewRecipeIds.has(recipeId)) {
+            currentNewRecipeIds.add(recipeId);
+            changed = true;
+          }
+        }
+
+        if (!changed) {
+          return currentProgress;
+        }
+
+        return {
+          ...currentProgress,
+          newRecipeIds: Array.from(currentNewRecipeIds),
+        };
+      });
 
       if (gameStarted) {
         setRecipeNoticePending(true);
@@ -1393,10 +1668,15 @@ export default function App() {
     }
 
     pointerActiveRef.current = false;
-    activePointerIdRef.current = null;
-    jugglePointRef.current = null;
-    spinAnglesRef.current.clear();
+	    activePointerIdRef.current = null;
+	    jugglePointRef.current = null;
+    setJuggleShoePoint(null);
+	    spinAnglesRef.current.clear();
     lastPointRef.current = null;
+    awardBallJugglePayouts(
+      itemsRef.current.filter((item): item is FallingBadBall => item.kind === 'bad-ball'),
+      performance.now(),
+    );
     itemsRef.current = [];
     sliceEffectsRef.current = [];
     sliceLockRef.current = null;
@@ -1416,7 +1696,7 @@ export default function App() {
     }, FINAL_RED_CARD_DELAY_MS);
 
     return () => window.clearTimeout(timeout);
-  }, [gameOver, gameStarted, lives]);
+  }, [awardBallJugglePayouts, gameOver, gameStarted, lives]);
 
   useEffect(() => {
     let frame = 0;
@@ -1432,7 +1712,7 @@ export default function App() {
       }
 
       let movedItems = itemsRef.current.map((item) => {
-        const gravity = arenaSize.width < 620 ? 760 : 720;
+	        const gravity = getFallingItemGravity(arenaSize.width, item.kind);
         const nextX = item.x + item.vx * dt;
         const contained = containHorizontalMotion(
           nextX,
@@ -1451,32 +1731,49 @@ export default function App() {
         };
       });
 
-      const jugglePoint = jugglePointRef.current;
+	      const jugglePoint = jugglePointRef.current;
 
-      if (jugglePoint && isPointInJuggleZone(jugglePoint, arenaSize.height)) {
-        movedItems = applyJuggleToItems(
-          movedItems,
-          { ...jugglePoint, t: now },
-          arenaSize.width,
-          arenaSize.height,
-        );
-      }
+	      if (jugglePoint && isPointInJuggleZone(jugglePoint, arenaSize.height)) {
+	        const juggleResult = applyJuggleToBall(
+	          movedItems,
+	          { ...jugglePoint, t: now },
+	          arenaSize.width,
+	          arenaSize.height,
+	        );
+        movedItems = juggleResult.items;
 
-      const nextItems = movedItems.filter(
+        if (juggleResult.bouncedBall) {
+          setBallJuggleCallout({
+            id: makeId('ball-juggle-count'),
+            kind: 'count',
+            count: juggleResult.bouncedBall.juggleCount,
+          });
+        }
+	      }
+
+	      const nextItems = movedItems.filter(
         (item) =>
           item.y < arenaSize.height + item.size * 1.8 &&
           (item.kind !== 'bad-ball' ||
             item.puncturedAt === null ||
             now - item.puncturedAt < PUNCTURED_BALL_LIFETIME_MS),
+	      );
+	      const visibleItemIds = new Set(nextItems.map((item) => item.id));
+      const settledBalls = movedItems.filter(
+        (item): item is FallingBadBall =>
+          item.kind === 'bad-ball' && item.juggleCount > 0 && !visibleItemIds.has(item.id),
       );
-      const visibleItemIds = new Set(nextItems.map((item) => item.id));
-      const missedAmount = movedItems.filter(
-        (item) => item.kind === 'ingredient' && !visibleItemIds.has(item.id),
-      ).length;
+	      const missedAmount = movedItems.filter(
+	        (item) => item.kind === 'ingredient' && !visibleItemIds.has(item.id),
+	      ).length;
 
-      if (missedAmount > 0) {
-        registerMissedIngredients(missedAmount);
+      if (settledBalls.length > 0) {
+        awardBallJugglePayouts(settledBalls, now);
       }
+
+	      if (missedAmount > 0) {
+	        registerMissedIngredients(missedAmount);
+	      }
 
       itemsRef.current = nextItems;
       setItems(nextItems);
@@ -1516,7 +1813,7 @@ export default function App() {
 
     frame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame);
-  }, [arenaSize.height, arenaSize.width, gamePaused, registerMissedIngredients]);
+  }, [arenaSize.height, arenaSize.width, awardBallJugglePayouts, gamePaused, registerMissedIngredients]);
 
   useEffect(() => {
     if (gamePaused) {
@@ -1540,6 +1837,9 @@ export default function App() {
 
 	        setItems((currentItems) => {
 	          const openSlots = Math.max(0, 12 - currentItems.length);
+          const hasActiveBadBall =
+            currentItems.some((item) => item.kind === 'bad-ball') ||
+            itemsRef.current.some((item) => item.kind === 'bad-ball');
           let remainingSlots = openSlots;
           const shouldLaunchLifeCard =
             remainingSlots > 0 &&
@@ -1552,6 +1852,7 @@ export default function App() {
 
           const shouldLaunchBadBall =
             remainingSlots > 0 &&
+            !hasActiveBadBall &&
             !badBallNeedsFoodGapRef.current &&
             Math.random() < BAD_BALL_SPAWN_CHANCE;
           const badBallLaunch =
@@ -1624,6 +1925,20 @@ export default function App() {
     const timeout = window.setTimeout(() => setComboBanner(null), COMBO_BANNER_LIFETIME_MS);
     return () => window.clearTimeout(timeout);
   }, [comboBanner]);
+
+  useEffect(() => {
+    if (!ballJuggleCallout) {
+      return;
+    }
+
+    const timeout = window.setTimeout(
+      () => setBallJuggleCallout(null),
+      ballJuggleCallout.kind === 'payout'
+        ? BALL_JUGGLE_PAYOUT_CALLOUT_LIFETIME_MS
+        : BALL_JUGGLE_COUNT_CALLOUT_LIFETIME_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [ballJuggleCallout]);
 
   const registerSpinGesture = useCallback((point: TrailPoint, previousPoint: TrailPoint) => {
     const spinAngles = spinAnglesRef.current;
@@ -1700,6 +2015,7 @@ export default function App() {
       }))
       .filter((target) => target.distance <= target.radius);
     const fragmentTargets: FragmentTarget[] = sliceEffectsRef.current
+      .filter(canSliceFragment)
       .map((effect) => ({
         kind: 'fragment' as const,
         effect,
@@ -1729,12 +2045,11 @@ export default function App() {
     const fragmentTargetsOnly = targets.filter(
       (target): target is FragmentTarget => target.kind === 'fragment',
     );
-    const cutPoints = ingredientTargets.length + fragmentTargetsOnly.length;
+    const totalCutCount = ingredientTargets.length + fragmentTargetsOnly.length;
     const cutIngredientEntries = ingredientTargets.map((target) => ({
         id: target.item.id,
         multiplier: getJuggleMultiplier(target.item.juggleCount),
       }));
-    const fragmentCutPoints = fragmentTargetsOnly.length;
     const currentCombo =
       activeComboRef.current &&
       point.t - activeComboRef.current.lastMovementAt <= MOVEMENT_COMBO_RESET_MS
@@ -1749,12 +2064,12 @@ export default function App() {
     const previousAwardedPoints = currentCombo?.awardedPoints ?? 0;
     const comboPoints = getComboPointsFromMultipliers(comboIngredientMultipliers.values());
     const comboEarnedPoints = comboPoints - previousAwardedPoints;
-    const earnedPoints = comboEarnedPoints + fragmentCutPoints;
+    const earnedPoints = comboEarnedPoints;
     const previousPopupId = currentCombo?.popupId ?? null;
     const nextPopupId = cutIngredientEntries.length > 0 ? makeId('score-popup') : null;
     const replacedPopupId = nextPopupId ? previousPopupId : null;
 
-    if (comboIngredientMultipliers.size > 0) {
+    if (cutIngredientEntries.length > 0 && comboIngredientMultipliers.size > 0) {
       activeComboRef.current = {
         popupId: nextPopupId ?? currentCombo?.popupId ?? makeId('score-popup'),
         ingredientMultipliers: comboIngredientMultipliers,
@@ -1772,10 +2087,11 @@ export default function App() {
 
       return {
         score: currentProgress.score + earnedPoints,
-        cuts: currentProgress.cuts + cutPoints,
+        cuts: currentProgress.cuts + totalCutCount,
         inventory,
+        newRecipeIds: currentProgress.newRecipeIds,
       };
-	    });
+			    });
 
     if (penaltyCardTargets.length > 0) {
       setLives((currentLives) => Math.min(INITIAL_LIVES, currentLives + penaltyCardTargets.length));
@@ -1805,22 +2121,11 @@ export default function App() {
               ]
             : freshPopups;
 
-        if (fragmentCutPoints > 0) {
-          nextPopups.push({
-            id: makeId('score-popup'),
-            amount: fragmentCutPoints,
-            isCombo: false,
-            x: point.x,
-            y: point.y,
-            t: point.t,
-          });
-        }
+		        return nextPopups.slice(-18);
+		      },
+		    );
 
-	        return nextPopups.slice(-18);
-	      },
-	    );
-
-    if (comboIngredientMultipliers.size > 1) {
+    if (cutIngredientEntries.length > 0 && comboIngredientMultipliers.size > 1) {
       setComboBanner({
         id: makeId('combo-banner'),
         multiplier: comboIngredientMultipliers.size,
@@ -1845,10 +2150,11 @@ export default function App() {
         : target.effect,
     );
     const newFragments = splitSources.flatMap((source) => splitSliceSource(source));
+    const lockableFragments = newFragments.filter(canSliceFragment);
     const nextLock: SliceLock | null =
-      newFragments.length > 0
+      lockableFragments.length > 0
         ? {
-            fragmentIds: newFragments.map((fragment) => fragment.id),
+            fragmentIds: lockableFragments.map((fragment) => fragment.id),
             cursorX: point.x,
             cursorY: point.y,
             fallbackX: point.x,
@@ -1913,16 +2219,20 @@ export default function App() {
     (clientX: number, clientY: number) => {
       if (gamePaused) {
         activeComboRef.current = null;
+        setJuggleShoePoint(null);
         return;
       }
 
       const point = clientPointToArena(clientX, clientY);
-	      if (!point) {
-	        return;
-	      }
+		      if (!point) {
+		        setJuggleShoePoint(null);
+		        return;
+		      }
 
       if (isPointInJuggleZone(point, arenaSize.height)) {
-        jugglePointRef.current = pointerActiveRef.current ? point : null;
+        const activeJugglePoint = pointerActiveRef.current ? point : null;
+        jugglePointRef.current = activeJugglePoint;
+        setJuggleShoePoint(activeJugglePoint);
         activeComboRef.current = null;
         lastPointRef.current = null;
         sliceLockRef.current = null;
@@ -1932,6 +2242,7 @@ export default function App() {
       }
 
       jugglePointRef.current = null;
+      setJuggleShoePoint(null);
 
 	      const previousPoint = lastPointRef.current;
       const recentPreviousPoint =
@@ -1959,10 +2270,8 @@ export default function App() {
 	        return;
 	      }
 
-      registerSpinGesture(point, recentPreviousPoint);
-
-	      if (
-	        activeComboRef.current &&
+		      if (
+		        activeComboRef.current &&
 	        point.t - activeComboRef.current.lastMovementAt > MOVEMENT_COMBO_RESET_MS
 	      ) {
 	        activeComboRef.current = null;
@@ -1986,8 +2295,8 @@ export default function App() {
         ].slice(-12),
       );
     },
-	    [arenaSize.height, clientPointToArena, gamePaused, registerSpinGesture, sliceAt],
-	  );
+	    [arenaSize.height, clientPointToArena, gamePaused, sliceAt],
+		  );
 
   const handlePointerDown = useCallback(
 	    (event: React.PointerEvent<HTMLElement>) => {
@@ -2032,8 +2341,9 @@ export default function App() {
       return;
     }
 
-	    activeComboRef.current = null;
-	    jugglePointRef.current = null;
+		    activeComboRef.current = null;
+		    jugglePointRef.current = null;
+	    setJuggleShoePoint(null);
     spinAnglesRef.current.clear();
 
     if (event.pointerType === 'mouse' && !pointerActiveRef.current) {
@@ -2047,9 +2357,10 @@ export default function App() {
       return;
     }
 
-	    pointerActiveRef.current = false;
+		    pointerActiveRef.current = false;
     activePointerIdRef.current = null;
-	    jugglePointRef.current = null;
+		    jugglePointRef.current = null;
+    setJuggleShoePoint(null);
     spinAnglesRef.current.clear();
     lastPointRef.current = null;
     activeComboRef.current = null;
@@ -2063,23 +2374,41 @@ export default function App() {
     pointerActiveRef.current = false;
     activePointerIdRef.current = null;
     jugglePointRef.current = null;
+    setJuggleShoePoint(null);
     spinAnglesRef.current.clear();
     lastPointRef.current = null;
     itemsRef.current = [];
     sliceEffectsRef.current = [];
     sliceLockRef.current = null;
     activeComboRef.current = null;
+    elapsedGameMsRef.current = 0;
     setPauseOpen(false);
     setCountdownValue(null);
+    setElapsedGameSeconds(0);
     setFinalRedCardVisible(false);
     setItems([]);
     setSliceEffects([]);
     setTrail([]);
-    setPuncturedBalls([]);
-    setScorePopups([]);
-    setComboBanner(null);
-    setUnlockToast(null);
-  }, []);
+	    setPuncturedBalls([]);
+	    setScorePopups([]);
+	    setComboBanner(null);
+    setBallJuggleCallout(null);
+	    setUnlockToast(null);
+	  }, []);
+
+  const openGameOverShortcut = useCallback(() => {
+    if (!gameStarted || gameOver) {
+      return;
+    }
+
+    clearActiveRound();
+    setSettingsOpen(false);
+    setRecipesOpen(false);
+    setSelectedRecipe(null);
+    setConfirmMenuOpen(false);
+    setTutorialOpen(false);
+    setGameOver(true);
+  }, [clearActiveRound, gameOver, gameStarted]);
 
   const resetAllProgress = useCallback(() => {
     const emptyProgress = createEmptyProgress();
@@ -2099,6 +2428,33 @@ export default function App() {
     setGameStarted(false);
   }, [clearActiveRound]);
 
+  useEffect(() => {
+    const handleShortcutKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      if (event.key.toLowerCase() !== 'p') {
+        return;
+      }
+
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+
+      openGameOverShortcut();
+    };
+
+    window.addEventListener('keydown', handleShortcutKeyDown);
+    return () => window.removeEventListener('keydown', handleShortcutKeyDown);
+  }, [openGameOverShortcut]);
+
   const startGame = useCallback(() => {
     knownUnlockedRef.current = new Set(
       RECIPES.filter((recipe) => isRecipeUnlocked(recipe, progress.inventory)).map(
@@ -2110,6 +2466,7 @@ export default function App() {
       score: 0,
       cuts: 0,
       inventory: currentProgress.inventory,
+      newRecipeIds: currentProgress.newRecipeIds,
     }));
     setLives(INITIAL_LIVES);
     setGameOver(false);
@@ -2149,9 +2506,10 @@ export default function App() {
 
   const openPauseMenu = useCallback(() => {
     pointerActiveRef.current = false;
-    activePointerIdRef.current = null;
-    jugglePointRef.current = null;
-    spinAnglesRef.current.clear();
+	    activePointerIdRef.current = null;
+	    jugglePointRef.current = null;
+    setJuggleShoePoint(null);
+	    spinAnglesRef.current.clear();
     lastPointRef.current = null;
     activeComboRef.current = null;
     setTrail([]);
@@ -2180,6 +2538,7 @@ export default function App() {
       score: 0,
       cuts: 0,
       inventory: currentProgress.inventory,
+      newRecipeIds: currentProgress.newRecipeIds,
     }));
     setLives(INITIAL_LIVES);
     setGameOver(false);
@@ -2199,11 +2558,29 @@ export default function App() {
     setGameStarted(false);
   }, [clearActiveRound]);
 
+  const markRecipeViewed = useCallback((recipeId: string) => {
+    setProgress((currentProgress) => {
+      if (!currentProgress.newRecipeIds.includes(recipeId)) {
+        return currentProgress;
+      }
+
+      return {
+        ...currentProgress,
+        newRecipeIds: currentProgress.newRecipeIds.filter((id) => id !== recipeId),
+      };
+    });
+  }, []);
+
+  const openRecipeDetail = useCallback((recipe: Recipe) => {
+    markRecipeViewed(recipe.id);
+    setSelectedRecipe(recipe);
+  }, [markRecipeViewed]);
+
   const openRecipeBookAtRecipe = useCallback((recipe: Recipe) => {
     setRecipeNoticePending(false);
     setRecipesOpen(true);
-    setSelectedRecipe(recipe);
-  }, []);
+    openRecipeDetail(recipe);
+  }, [openRecipeDetail]);
 
   const openRecipeBook = useCallback(() => {
     setRecipeNoticePending(false);
@@ -2211,26 +2588,41 @@ export default function App() {
   }, []);
 
   return (
-    <main className="game-shell">
+    <main className={`game-shell ${gameStarted ? 'is-playing' : 'is-menu'}`}>
       <section
         ref={arenaRef}
         className="arena"
-        aria-label="Arena Copa dos Sabores"
+        aria-label="Arena Sabores na Copa"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishPointer}
         onPointerCancel={finishPointer}
         onPointerLeave={handlePointerLeave}
       >
-        {gameStarted ? (
+	        {gameStarted ? (
+	          <div
+	            className="juggle-zone-divider"
+	            style={{ top: `${(1 - JUGGLE_ZONE_HEIGHT_RATIO) * 100}%` }}
+	            aria-hidden="true"
+	          />
+	        ) : null}
+
+        {juggleShoePoint ? (
           <div
-            className="juggle-zone-divider"
-            style={{ top: `${(1 - JUGGLE_ZONE_HEIGHT_RATIO) * 100}%` }}
+            className="juggle-shoe-indicator"
+            style={
+              {
+                left: juggleShoePoint.x,
+                top: juggleShoePoint.y,
+              } as React.CSSProperties
+            }
             aria-hidden="true"
-          />
+          >
+            <span className="juggle-shoe-emoji">👟</span>
+          </div>
         ) : null}
 
-        {items.map((item) => {
+	        {items.map((item) => {
           if (item.kind === 'penalty-card') {
             return (
               <div
@@ -2253,9 +2645,11 @@ export default function App() {
 
           if (item.kind === 'bad-ball') {
             return (
-              <div
-                key={item.id}
-                className={`bad-ball ${item.puncturedAt === null ? '' : 'is-punctured'}`}
+	              <div
+	                key={item.id}
+	                className={`bad-ball ${item.juggleCount > 0 ? 'is-juggled' : ''} ${
+                    item.puncturedAt === null ? '' : 'is-punctured'
+                  }`}
                 aria-label={item.puncturedAt === null ? 'Bola de futebol' : 'Bola de futebol furada'}
                 style={
                   {
@@ -2350,6 +2744,23 @@ export default function App() {
           </div>
         ) : null}
 
+        {ballJuggleCallout ? (
+          <div
+            className={`ball-juggle-callout is-${ballJuggleCallout.kind}`}
+            key={ballJuggleCallout.id}
+            aria-live="polite"
+          >
+            {ballJuggleCallout.kind === 'count' ? (
+              <>
+                <strong>{ballJuggleCallout.count}</strong>
+                <span>{getBallJuggleLabel(ballJuggleCallout.count)}</span>
+              </>
+            ) : (
+              <strong>+{ballJuggleCallout.points}</strong>
+            )}
+          </div>
+        ) : null}
+
         {countdownValue ? (
           <div className="countdown-overlay" key={countdownValue} aria-live="assertive">
             <span>{countdownValue === 'ja' ? 'Já!' : countdownValue}</span>
@@ -2358,8 +2769,8 @@ export default function App() {
 
         {finalRedCardVisible ? (
           <div className="final-red-card-overlay" aria-live="assertive" role="status">
-            <strong>Falta!</strong>
-            <span className="final-red-card" aria-label="Cartão vermelho" />
+            <strong>Tá fora!</strong>
+            <img className="final-red-card" src={redCardUrl} alt="Cartão vermelho" />
           </div>
         ) : null}
 
@@ -2392,42 +2803,56 @@ export default function App() {
 
 	      {gameStarted ? (
 	        <>
-	          <div className="top-hud" aria-live="polite">
+	          <div className="top-hud">
 	            <div
-	              className="life-hud"
-	              aria-label={`${INITIAL_LIVES - lives} cartões recebidos.`}
-            >
+	              className="scoreboard"
+	              aria-label={`Tempo de jogo ${gameClock}. Pontuação: ${progress.score} pontos.`}
+	            >
+	              <div className="scoreboard-meta">
+	                <div className="scoreboard-time">{gameClock}</div>
+	                <div className="scoreboard-brand">
+	                  <img src={receitasIconLogoUrl} alt="Receitas" />
+	                </div>
+	              </div>
+	              <div
+	                className="scoreboard-score"
+	                aria-live="polite"
+	                style={
+	                  {
+	                    '--score-font-size': `${Math.max(
+	                      2.4,
+	                      6.4 - Math.max(0, String(progress.score).length - 1) * 0.62,
+	                    )}rem`,
+	                  } as React.CSSProperties
+	                }
+	              >
+	                <span>PTS</span>
+	                <strong>{progress.score}</strong>
+	              </div>
+	            </div>
+	            <div className="life-hud" aria-label={`${INITIAL_LIVES - lives} cartões recebidos.`}>
               <span className="life-icons" aria-hidden="true">
                 {Array.from({ length: INITIAL_LIVES }, (_, index) => (
-                  <span
-                    className={`penalty-card ${getPenaltyCardStateClass(index, lives)}`}
+                  <img
+                    className="penalty-card"
+                    src={getPenaltyCardImageUrl(index, lives)}
+                    alt=""
                     key={index}
                   />
 	                ))}
 	              </span>
 	            </div>
-	            <div className="score-card">
-	              <Trophy size={28} aria-hidden="true" />
-	              <span>
-	                <strong>{progress.score}</strong>
-	              </span>
-	            </div>
 	          </div>
 
-          <div className="cup-badge" aria-hidden="true">
-            <span>🏆</span>
-            <strong>Copa dos Sabores</strong>
-          </div>
-
-	          <div className="bottom-hud">
+		          <div className="bottom-hud">
 	            <button
-	              className="icon-button"
+	              className="icon-button pause-button"
 	              type="button"
 	              onClick={openPauseMenu}
 	              title="Pausar"
 	              aria-label="Pausar jogo"
 	            >
-	              <Pause size={20} aria-hidden="true" />
+	              <img src={pausaButtonUrl} alt="" aria-hidden="true" />
 	            </button>
 	          </div>
         </>
@@ -2440,24 +2865,14 @@ export default function App() {
             title="Configurações"
             aria-label="Abrir configurações"
           >
-            <Settings size={22} aria-hidden="true" />
-          </button>
+            <img src={opcoesButtonUrl} alt="" aria-hidden="true" />
+	          </button>
 	          <div className="start-menu-content">
-            <div className="start-brand-lockup" aria-label="Receitas + Copa do Mundo">
-              <div className="start-logo">
-                <img src={receitasLogoUrl} alt="Receitas" />
-              </div>
-              <span className="start-brand-plus" aria-hidden="true">
-                +
-              </span>
-            </div>
-	            <h1 id="start-menu-title">Copa dos Sabores</h1>
+	            <h1 id="start-menu-title" className="start-title-logo">
+                <img src={gameLogoUrl} alt="Sabores na Copa" />
+              </h1>
 	          </div>
             <div className="start-actions">
-              <button className="start-button primary" type="button" onClick={requestStartGame}>
-                <Play size={22} aria-hidden="true" />
-                <span>Iniciar</span>
-              </button>
 	              <button
 	                className="start-button secondary start-recipes-button"
 	                type="button"
@@ -2465,8 +2880,16 @@ export default function App() {
 	                title="Receitas"
 	                aria-label={`Abrir receitas: ${unlockedRecipes.length} de ${RECIPES.length} desbloqueadas`}
 	              >
-	                <BookOpen size={22} aria-hidden="true" />
+	                <img src={receitasButtonUrl} alt="" aria-hidden="true" />
 	              </button>
+              <button
+                className="start-button primary"
+                type="button"
+                onClick={requestStartGame}
+                aria-label="Iniciar"
+              >
+                <img src={playButtonUrl} alt="" aria-hidden="true" />
+              </button>
               {recipeNoticePending ? (
                 <button className="recipe-unlock-callout" type="button" onClick={openRecipeBook}>
                   Nova receita desbloqueada
@@ -2477,7 +2900,7 @@ export default function App() {
 	      )}
 
       {gameStarted && unlockToast ? (
-        <UnlockToast recipe={unlockToast} onOpen={() => setSelectedRecipe(unlockToast)} />
+        <UnlockToast recipe={unlockToast} onOpen={() => openRecipeDetail(unlockToast)} />
       ) : null}
 
       {settingsOpen ? (
@@ -2521,11 +2944,10 @@ export default function App() {
       {recipesOpen ? (
         <RecipeBook
           inventory={progress.inventory}
+          newRecipeIds={progress.newRecipeIds}
           unlockedCount={unlockedRecipes.length}
           onClose={() => setRecipesOpen(false)}
-          onSelect={(recipe) => {
-            setSelectedRecipe(recipe);
-          }}
+          onSelect={openRecipeDetail}
         />
       ) : null}
 
@@ -2538,9 +2960,16 @@ export default function App() {
 
       {scrollHintVisible ? (
         <div className="scroll-hint-overlay" aria-live="polite" role="status">
-          <div className="scroll-hint-message">
-            <strong>Você pode rolar a página</strong>
-            <span>Continue navegando para ver o restante do conteúdo.</span>
+          <div className="scroll-hint-stack">
+            <div className="scroll-hint-message">
+              <strong>Você pode rolar a página</strong>
+              <span>Continue navegando para ver o restante do conteúdo.</span>
+            </div>
+            <p className="scroll-hint-caption">
+              Ou clique em qualquer lugar da tela
+              <br />
+              para continuar jogando.
+            </p>
           </div>
         </div>
       ) : null}
@@ -2606,11 +3035,11 @@ function TutorialDialog({ onStart }: { onStart: () => void }) {
       title: 'Pegue o cartão amarelo',
       text: 'Quando estiver com cartão marcado, corte o cartão amarelo para recuperar uma chance.',
     },
-    {
-      icon: '✨',
-      title: 'Multiplique os pontos',
-      text: 'Use a faixa de baixo para embaixadinhas ou circule ingredientes para aumentar o valor deles.',
-    },
+	    {
+	      icon: '✨',
+	      title: 'Faça embaixadinhas',
+	      text: 'Use a faixa de baixo para quicar a bola e guardar pontos extras até ela sair da tela.',
+	    },
   ];
 
   return (
@@ -2841,86 +3270,94 @@ function GameOverDialog({
   return (
     <div className="game-over-screen" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
       <div className="game-over-dialog">
-        <h2 id="game-over-title">Fim de jogo</h2>
-        <div className="final-brand-lockup" aria-label="Receitas + Copa do Mundo">
-          <img src={receitasLogoUrl} alt="Receitas" />
-          <span aria-hidden="true">+</span>
-          <strong>Copa do Mundo</strong>
-        </div>
-        <div className="final-score" aria-label={`Pontuação final: ${score} pontos`}>
-          <Trophy size={26} aria-hidden="true" />
-          <span>
-            <strong>{score}</strong>
-            <small>pontos</small>
-          </span>
-        </div>
-        <div className="new-recipes-summary">
-          <strong>Receitas novas</strong>
-          {newRecipes.length > 0 ? (
-	            <ul>
-	              {newRecipes.map((recipe) => (
-	                <li key={recipe.id}>
-                    <button
-                      className="new-recipe-button"
-                      type="button"
-                      onClick={() => onRecipeOpen(recipe)}
-                    >
-	                    <span aria-hidden="true">{recipe.flag}</span>
-	                    <strong>{recipe.name}</strong>
-                    </button>
-	                </li>
-	              ))}
-	            </ul>
-          ) : allRecipesUnlocked ? (
-            <p>Todas as receitas adquiridas.</p>
-          ) : (
-            <p>Nenhuma receita nova nesta rodada.</p>
-	          )}
-	        </div>
-        <div className="result-share-actions">
-          <button className="result-share-button secondary" type="button" onClick={handleDownload}>
-            <Download size={21} aria-hidden="true" />
-            <span>Download</span>
-          </button>
-          <button
-            className="result-share-button secondary"
-            type="button"
-            onClick={handleShare}
-            disabled={sharing}
-          >
-            <Share2 size={21} aria-hidden="true" />
-            <span>{sharing ? 'Abrindo...' : 'Compartilhar'}</span>
-          </button>
-        </div>
-        <div className="confirm-actions game-over-actions">
-          <button
-            className="confirm-button secondary"
-            type="button"
-            onClick={onMenu}
-            title="Voltar ao menu"
-            aria-label="Voltar ao menu"
-          >
-            <Home size={22} aria-hidden="true" />
-          </button>
-          <button
-            className="confirm-button secondary"
-            type="button"
-            onClick={onRecipes}
-            title="Receitas"
-            aria-label="Abrir receitas"
-          >
-            <BookOpen size={22} aria-hidden="true" />
-          </button>
-          <button
-            className="confirm-button primary"
-            type="button"
-            onClick={onRestart}
-            title="Jogar novamente"
-            aria-label="Jogar novamente"
-          >
-            <Play size={24} aria-hidden="true" />
-          </button>
-	        </div>
+        <section className="game-over-title-section" aria-labelledby="game-over-title">
+          <header className="game-over-header">
+            <img className="final-brand-word" src={receitasHorizontalLogoUrl} alt="Receitas" />
+            <h2 id="game-over-title">Fim de Jogo</h2>
+          </header>
+        </section>
+        <section className="game-over-score-section" aria-label={`Pontuação final: ${score} pontos`}>
+          <div className="final-score">
+            <strong className="final-score-label">Pontos</strong>
+            <span className="final-score-value">{score}</span>
+          </div>
+        </section>
+        <section className="game-over-recipes-section" aria-labelledby="new-recipes-title">
+          <div className="new-recipes-summary">
+            <strong id="new-recipes-title" className="new-recipes-label">
+              Receitas Novas
+            </strong>
+            <div className="new-recipes-panel">
+              {newRecipes.length > 0 ? (
+                <ul>
+                  {newRecipes.map((recipe) => (
+                    <li key={recipe.id}>
+                      <button
+                        className="new-recipe-button"
+                        type="button"
+                        onClick={() => onRecipeOpen(recipe)}
+                      >
+                        <span aria-hidden="true">{recipe.flag}</span>
+                        <strong>{recipe.name}</strong>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : allRecipesUnlocked ? (
+                <p className="new-recipes-empty">Todas as receitas adquiridas.</p>
+              ) : (
+                <p className="new-recipes-empty">Nenhuma receita nova nesta rodada.</p>
+              )}
+            </div>
+          </div>
+        </section>
+        <section className="game-over-actions-section" aria-label="Ações de fim de jogo">
+          <div className="game-over-action-stack">
+            <div className="result-share-actions">
+              <button className="result-share-button" type="button" onClick={handleDownload} aria-label="Baixar">
+                <img src={gameOverDownloadButtonUrl} alt="" aria-hidden="true" />
+              </button>
+              <button
+                className="result-share-button"
+                type="button"
+                onClick={handleShare}
+                disabled={sharing}
+                aria-label={sharing ? 'Abrindo compartilhamento' : 'Compartilhar'}
+              >
+                <img src={gameOverShareButtonUrl} alt="" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="confirm-actions game-over-actions">
+              <button
+                className="confirm-button secondary game-over-action-back"
+                type="button"
+                onClick={onMenu}
+                title="Voltar ao menu"
+                aria-label="Voltar ao menu"
+              >
+                <img src={recipeBackButtonUrl} alt="" aria-hidden="true" />
+              </button>
+              <button
+                className="confirm-button secondary game-over-action-recipes"
+                type="button"
+                onClick={onRecipes}
+                title="Receitas"
+                aria-label="Abrir receitas"
+              >
+                <img src={gameOverRecipesButtonUrl} alt="" aria-hidden="true" />
+              </button>
+              <button
+                className="confirm-button primary game-over-action-restart"
+                type="button"
+                onClick={onRestart}
+                title="Jogar novamente"
+                aria-label="Jogar novamente"
+              >
+                <img src={gameOverRestartButtonUrl} alt="" aria-hidden="true" />
+              </button>
+		            </div>
+          </div>
+        </section>
 	      </div>
       {fallbackOpen ? (
         <ShareFallbackDialog
@@ -2981,90 +3418,86 @@ function ShareFallbackDialog({
 
 function RecipeBook({
   inventory,
+  newRecipeIds,
   unlockedCount,
   onClose,
   onSelect,
 }: {
   inventory: Inventory;
+  newRecipeIds: string[];
   unlockedCount: number;
   onClose: () => void;
   onSelect: (recipe: Recipe) => void;
 }) {
+  const newRecipeIdSet = new Set(newRecipeIds);
+
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Livro de receitas">
+    <div className="modal-backdrop recipe-book-backdrop" role="dialog" aria-modal="true" aria-label="Livro de receitas">
       <div className="recipe-panel">
         <header className="panel-header">
-          <ChefHat size={28} aria-hidden="true" />
-          <div>
-            <h2>Livro de receitas</h2>
-            <p>
-              {unlockedCount}/{RECIPES.length} liberadas
-            </p>
-          </div>
-          <button className="icon-button dark" type="button" onClick={onClose} aria-label="Fechar">
-            <X size={22} aria-hidden="true" />
-	          </button>
-	        </header>
-	
-	        <div className="recipe-grid">
-	          {RECIPES.map((recipe) => {
-	            const unlocked = isRecipeUnlocked(recipe, inventory);
-	
-	            return (
-	              <button
-                className={`recipe-card ${unlocked ? 'is-unlocked' : 'is-locked'}`}
+          <h2>Livro de Receitas</h2>
+          <p className="panel-header-progress">
+            <img src={recipeHeaderIconUrl} alt="" aria-hidden="true" />
+            <span>
+              {unlockedCount}/{RECIPES.length} desbloqueadas
+            </span>
+          </p>
+        </header>
+
+        <div className="recipe-grid">
+          {RECIPES.map((recipe) => {
+            const unlocked = isRecipeUnlocked(recipe, inventory);
+            const isNew = unlocked && newRecipeIdSet.has(recipe.id);
+
+            return (
+              <button
+                className={`recipe-card ${unlocked ? 'is-unlocked' : 'is-locked'} ${isNew ? 'is-new' : ''}`}
                 key={recipe.id}
                 type="button"
                 onClick={() => unlocked && onSelect(recipe)}
                 disabled={!unlocked}
-		              >
-                    {unlocked ? (
-                      <>
-                        <span className="recipe-status">
-                          <Unlock size={18} aria-hidden="true" />
-                          <small>Liberada</small>
-                        </span>
-                        <span className="recipe-title">
-                          <span>{recipe.flag}</span>
-                          <span>
-                            <strong>{recipe.name}</strong>
-                            <small>{recipe.country}</small>
-                          </span>
-                        </span>
-                      </>
-                    ) : (
-                      <div className="locked-recipe-content">
-                        <div className="locked-recipe-header">
-                          <span className="locked-recipe-country">
-                            <span className="locked-recipe-flag">{recipe.flag}</span>
-                            <strong>{recipe.country}</strong>
-                          </span>
-                          <span className="recipe-status">
-                            <Lock size={18} aria-hidden="true" />
-                            <small>Bloqueada</small>
-                          </span>
-                        </div>
-                        <div className="locked-recipe-needs" aria-label="Ingredientes necessários">
-                          {recipeEntries(recipe).map(([key, amount]) => {
-                            const ingredient = INGREDIENT_BY_KEY[key];
-                            const current = inventory[key];
+              >
+                <span className="recipe-card-header">
+                  <span className="recipe-card-country">
+                    <span className="recipe-card-flag-box" aria-hidden="true">
+                      {recipe.flag}
+                    </span>
+                    <span className="recipe-card-country-name">{recipe.country}</span>
+                  </span>
+                  <span className="recipe-card-lock" aria-hidden="true">
+                    <img src={unlocked ? recipeUnlockedIconUrl : recipeLockedIconUrl} alt="" />
+                  </span>
+                </span>
+                {unlocked ? (
+                  <span className="recipe-card-name-row">
+                    {isNew ? <span className="recipe-new-dot" aria-label="Receita nova" /> : null}
+                    <strong className="recipe-card-name">{recipe.name}</strong>
+                  </span>
+                ) : (
+                  <span className="locked-recipe-needs" aria-label="Ingredientes necessários">
+                    {recipeEntries(recipe).map(([key, amount]) => {
+                      const ingredient = INGREDIENT_BY_KEY[key];
+                      const current = inventory[key];
+                      const completed = current >= amount;
 
-                            return (
-                              <span className="locked-need-chip" key={key}>
-                                <span>{ingredient.emoji}</span>
-                                <small>
-                                  {current}/{amount}
-                                </small>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-	              </button>
+                      return (
+                        <span className={`locked-need-chip ${completed ? 'is-complete' : ''}`} key={key}>
+                          <span>{ingredient.emoji}</span>
+                          <small>
+                            {current}/{amount}
+                          </small>
+                        </span>
+                      );
+                    })}
+                  </span>
+                )}
+              </button>
             );
           })}
         </div>
+        <button className="recipe-panel-close-button" type="button" onClick={onClose} aria-label="Voltar">
+          <img src={recipeBackButtonUrl} alt="" aria-hidden="true" />
+        </button>
       </div>
     </div>
   );
@@ -3085,9 +3518,6 @@ function RecipeDetail({
             <span className="detail-flag">{recipe.flag}</span>
             <h2>{recipe.name}</h2>
           </div>
-          <button className="icon-button dark" type="button" onClick={onClose} aria-label="Fechar">
-            <X size={22} aria-hidden="true" />
-          </button>
         </header>
 
         <div className={`recipe-detail-image ${recipe.imageUrl ? '' : 'is-empty'}`}>
@@ -3116,14 +3546,13 @@ function RecipeDetail({
         </section>
 
         <section className="detail-section">
-          <h3>Modo de preparo</h3>
-          <ol>
-            {recipe.steps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
+          <h3>Descrição</h3>
+          <p className="detail-description">{recipe.description || 'Descrição em breve.'}</p>
         </section>
       </article>
+      <button className="recipe-detail-close-button" type="button" onClick={onClose} aria-label="Voltar">
+        <img src={recipeBackButtonUrl} alt="" aria-hidden="true" />
+      </button>
     </div>
   );
 }
